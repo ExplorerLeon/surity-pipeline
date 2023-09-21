@@ -1,3 +1,7 @@
+'''
+Cleaning function to apply to excel data
+'''
+
 import pandas as pd
 import datetime
 
