@@ -1,3 +1,4 @@
+
 import pandas as pd
 import argparse
 import datetime
@@ -9,6 +10,8 @@ from apache_beam.io.gcp.gcsio import GcsIO
 from apache_beam.io.filebasedsource import FileBasedSource
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import SetupOptions
+
+from apache_beam.transforms import DoFn
 
 # import dotenv
 # dotenv.load_dotenv()
@@ -25,39 +28,48 @@ table_schema = {
         ]
     }
 
-class ExcelSource(FileBasedSource):
-    def __init__(self, file_pattern):
-        super().__init__(file_pattern, splittable=False)
+class ReadCSVFile(DoFn):
+    def process(self, element):
+        # Read the CSV file from GCS and convert to a Pandas DataFrame
+        gcs_path = f'{BUCKET}/{element}'
+        gcs = GcsIO()
+        with gcs.open(gcs_path) as file:
+            df = pd.read_excel(file)
 
-    def read_records(self, file_name, range_tracker):
-        # Use pandas to read the Excel file
-        with GcsIO().open(file_name) as f:
-            df = pd.read_excel(f)
+        # tranforms
+        df = transform(df)
 
-        yield df
+        # create schema
 
-def process_excel_file(df):
-    # Get the DataFrame from the list
-    # Find the first row index where the first column is not null
-    first_non_null_index = df[df.iloc[:, 0].notnull()].index[0]
-    # Extract rows from the first non-null cell in the first column onwards
-    company_name = df.iloc[first_non_null_index, 0]
-    print(company_name)
 
-    # Get the current date and time
-    current_time = datetime.datetime.now()
-    # Print the current time
-    print(current_time)
+        # yield rows
 
-    # Create a dictionary to represent the row data
-    row_data = {
-        'ID': 1,  # Replace with the actual ID if available
-        'CompanyName': company_name,
-        'Date': current_time
-    }
+        # Implement your data transformation logic here
+        # Example: Add a new column to the DataFrame
+        first_non_null_index = df[df.iloc[:, 0].notnull()].index[0]
+        # Extract rows from the first non-null cell in the first column onwards
+        company_name = df.iloc[first_non_null_index, 0]
+        print(company_name)
 
-    # Return the row data as a dictionary
-    return row_data
+        # Get the current date and time
+        current_time = datetime.datetime.now()
+        # Print the current time
+        print(current_time)
+
+        # Create a dictionary to represent the row data
+        row_data = {
+            'ID': [2,3,4],  # Replace with the actual ID if available
+            'CompanyName': [company_name,company_name,company_name],
+            'Date': [current_time,current_time,current_time]
+            }
+
+        df = pd.DataFrame.from_dict(row_data, orient='index').T
+        # Iterate over DataFrame rows and emit each row
+        for _, row in df.iterrows():
+            yield row.to_dict()
+
+        # Iterate over DataFrame rows and emit each row
+        # yield row_data
 
 def run(argv=None, save_main_session = True):
     parser = argparse.ArgumentParser()
@@ -73,23 +85,28 @@ def run(argv=None, save_main_session = True):
         beam_args,
         runner='DataflowRunner',
         project=PROJECT_ID,
-        job_name='test-2-ls',
+        job_name='test-4-dftodic-ls',
         temp_location=f'{BUCKET}/temp/',
         region='europe-west2')
+
     # Note: Repeatable options like dataflow_service_options or experiments must
     # be specified as a list of string(s).
     # e.g. dataflow_service_options=['enable_prime']
     pipeline_options.view_as(SetupOptions).save_main_session = save_main_session
 
     with beam.Pipeline(options=pipeline_options) as p:
-
-        excel_data = (
-            p
-            | 'Read Excel Files' >> beam.io.Read(ExcelSource(f'{BUCKET}/input/*.xlsm'))
-            | 'Transform Data' >> beam.Map(process_excel_file)
+        # List the CSV files in the GCS bucket
+        csv_files = (p
+            | 'List CSV Files' >> beam.Create(["input/Panthers Financial Model Oct-22.xlsm"])  # Replace with your file paths
         )
 
-        excel_data | 'Write to BigQuery' >> WriteToBigQuery(
+        # Read and transform each CSV file
+        transformed_data = (csv_files
+            | 'Read and Transform CSV Files' >> beam.ParDo(ReadCSVFile())
+        )
+
+        # Write the transformed data to BigQuery
+        transformed_data | 'Write to BigQuery' >> WriteToBigQuery(
             table=TABLE_SPEC,
             schema=table_schema,
             create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
