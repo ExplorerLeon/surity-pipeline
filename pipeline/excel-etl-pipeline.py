@@ -90,7 +90,7 @@ def run(argv=None, save_main_session = True):
 
     pipeline_options = PipelineOptions(
         beam_args,
-        runner='Direct', # DataflowRunner or Direct
+        runner='DataflowRunner', # DataflowRunner or Direct
         project=PROJECT_ID,
         job_name='test-6-book-ls',
         temp_location=f'{BUCKET}/temp/',
